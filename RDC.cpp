@@ -1,16 +1,37 @@
-#include "Project2.h"
- 
+#include "client.h"
+
+pthread_t ntid;
+int sockfd,o;
+char sendbuf[MAXSIZE],recebuf[MAXSIZE];
+
+void *Receive(void * arg)
+{
+    int n;
+    while (1)
+    {
+       
+       bzero(recebuf,sizeof(recebuf));
+       n = Read(sockfd,recebuf,MAXSIZE);
+       if (0 == n)
+         {
+           printf("The other size has been closed\n");
+           return (void *) 1;
+         }
+       else
+            Write(STDOUT_FILENO,recebuf,n);
+    }
+}
+
 int main(int argc,char * argv[])
 {
-    int sockfd;
     int port = atoi(argv[2]);
-    sockfd = Socket();
+    int n,err;
     struct sockaddr_in serv_addr;
     struct hostent *host;
-    char buf[MAXSIZE]; 
-    int n,cylinders,sectors,c,s,Order,i,length;
+    int cylinders,sectors,c,s,Order,i,length;
     char * tmp = new char[MAXSIZE];
 
+    sockfd = Socket();
     bzero(&serv_addr,sizeof(serv_addr));
     serv_addr.sin_family = AF_INET;
     host = gethostbyname(argv[1]);
@@ -18,68 +39,71 @@ int main(int argc,char * argv[])
     serv_addr.sin_port = htons(port);
 
     connect(sockfd,(struct sockaddr*)&serv_addr,sizeof(serv_addr));
-    
-    bzero(buf,sizeof(buf));
-    strcat(buf,"I\n");
-    printf("%s",buf);
-    Write(sockfd,buf,strlen(buf));
-    n = Read(sockfd,buf,MAXSIZE);
-    i = geti(buf,cylinders);
-    printf("%d\n",i);
-    i = geti(&buf[i],sectors);
-    printf("%d %d\n",cylinders,sectors);
+
     srand(time(NULL));
-    int o = rand() % 100 + 1;
-    printf("%d\n",o);
-    while (o > 0)
+    o = rand() % 100 + 1;
+    ++o;
+    printf("The command amount is %d\n",o);
+
+    bzero(sendbuf,sizeof(sendbuf));
+    strcat(sendbuf,"I\n");
+    printf("%s",sendbuf);
+    Write(sockfd,sendbuf,strlen(sendbuf));
+    n = Read(sockfd,sendbuf,MAXSIZE);
+    i = geti(sendbuf,cylinders);
+    i = geti(&sendbuf[i],sectors);
+    printf("%d %d\n",cylinders,sectors);
+    
+    err = pthread_create(&ntid,NULL,Receive,NULL);
+    if (err != 0)
+      {
+          perror("create thread failed\n");
+          exit(1);
+      }
+
+    while (o > 1)
     {
-        --n;
+        --o;
         Order = rand() % 2;
         if (Order == 0)  // read
         {
-           bzero(buf,sizeof(buf));
-           strcat(buf,"R ");
-           c = rand() % cylinders;
-           s = rand() % sectors;
-           tmp = itoa(c,tmp);
-           strcat(tmp," ");
-           strcat(buf,tmp);
-           tmp = itoa(s,tmp);
-           strcat(tmp," ");
-           strcat(buf,tmp);
+            bzero(sendbuf,sizeof(sendbuf));
+            strcat(sendbuf,"R ");
+            c = rand() % cylinders;
+            s = rand() % sectors;
+            tmp = itoa(c,tmp);
+            strcat(tmp," ");
+            strcat(sendbuf,tmp);
+            tmp = itoa(s,tmp);
+            strcat(tmp,"\n");
+            strcat(sendbuf,tmp);
         }
         else
         {
-           bzero(buf,sizeof(buf));
-           strcat(buf,"W ");
-           c = rand() % cylinders;
-           s = rand() % sectors;
-           tmp = itoa(c,tmp);
-           strcat(tmp," ");
-           strcat(buf,tmp);
-           tmp = itoa(s,tmp);
-           strcat(tmp," ");
-           strcat(buf,tmp);
-           length = rand() % 256 + 1;
-           tmp = itoa(length,tmp);
-           strcat(tmp," ");
-           strcat(buf,tmp);
-           for (int i = 0;i < length;++i)
-             tmp[i] = rand() % 10 + '0';
-           tmp[BLOCKSIZE] = 0;
-           strcat(buf,tmp);
+            bzero(sendbuf,sizeof(sendbuf));
+            strcat(sendbuf,"W ");
+            c = rand() % cylinders;
+            s = rand() % sectors;
+            tmp = itoa(c,tmp);
+            strcat(tmp," ");
+            strcat(sendbuf,tmp);
+            tmp = itoa(s,tmp);
+            strcat(tmp," ");
+            strcat(sendbuf,tmp);
+            length = rand() % 256 + 1;
+            tmp = itoa(length,tmp);
+            strcat(tmp," ");
+            strcat(sendbuf,tmp);
+            for (int i = 0;i < length;++i)
+                tmp[i] = rand() % 10 + '0';
+            tmp[length] = '\n';
+            tmp[length + 1] = 0;
+            strcat(sendbuf,tmp);
         }
-        Write(STDOUT_FILENO,buf,strlen(buf));
-        printf("\n");
-        Write(sockfd,buf,strlen(buf));
-        bzero(buf,sizeof(buf));
-        n = Read(sockfd,buf,MAXSIZE);
-        if (0 == n)
-            printf("The other size has been closed\n");
-        else
-            Write(STDOUT_FILENO,buf,n);
-
+        printf("%d %s",o,sendbuf);
+        Write(sockfd,sendbuf,strlen(sendbuf));
     }
+    pthread_join(ntid,NULL);
     Close(sockfd);
     return 0;
 }

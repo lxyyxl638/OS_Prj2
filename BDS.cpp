@@ -1,4 +1,5 @@
 #include "Project2.h"
+
 int main(int argc,char* argv[])
 {
     char buf[MAXSIZE],sendbuf[MAXSIZE];
@@ -42,7 +43,7 @@ int main(int argc,char* argv[])
                  break;
              }
           
-           
+            
              switch(buf[0])
             {
               case 'I':queryI(cylinders,sectors,sendbuf);break;
