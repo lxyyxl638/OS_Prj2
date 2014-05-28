@@ -24,6 +24,7 @@ char * diskfile;
 char recebuf[MAXSIZE],sendbuf[MAXSIZE];
 int client_sockfd;
 pthread_t tid;
+pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
 struct Node
 {
@@ -55,7 +56,7 @@ struct CmpC_LOOK
 std::queue <Node> CacheFCFS;
 std::priority_queue <Node,std::vector<Node>,CmpSSTF> CacheSSTF;
 std::priority_queue <Node,std::vector<Node>,CmpC_LOOK> CacheC_LOOK;
-
+Node Mynode;
 int Open(char* filename)
 {
     int fd = open(filename,O_RDWR|O_CREAT,0);
@@ -88,7 +89,7 @@ int Lseek(int fd,int size)
 
 void Mmap(char* & diskfile,int filesize,int fd)
 {
-    diskfile = (char *)mmap(0,filesize,PROT_READ|PROT_WRITE,MAP_SHARED,fd,0644);
+    diskfile = (char *)mmap(0,filesize,PROT_READ|PROT_WRITE,MAP_SHARED,fd,0);
 
     if (diskfile == MAP_FAILED)
     {
@@ -376,8 +377,9 @@ void handle(Node Mynode)
                          memcpy(&sendbuf[4],&diskfile[BLOCKSIZE * (Mynode.r * sectors + Mynode.s)],BLOCKSIZE);
                          strcat(sendbuf,"\n");
                          break;
-                case 'W':strcat(sendbuf,"Yes\n");
-                         memcpy(&diskfile[BLOCKSIZE * (Mynode.r * sectors + Mynode.s)],Mynode.data,len);
+                case 'W': 
+                         strcat(sendbuf,"Yes\n");
+                         memcpy(&diskfile[BLOCKSIZE * (Mynode.r * sectors + Mynode.s)],Mynode.data,strlen(Mynode.data));
                          break;
             }
         }
@@ -396,28 +398,34 @@ void *C_LOOK(void *arg)
         pthread_testcancel();
         if (!CacheC_LOOK.empty())
         {
+            pthread_mutex_lock(&mutex);
             Mynode = CacheC_LOOK.top();
             CacheC_LOOK.pop();
+            pthread_mutex_unlock(&mutex);
             handle(Mynode);
+            printf("%c %d %d successfully\n",Mynode.com,Mynode.r,Mynode.s);
             Write(client_sockfd,sendbuf,strlen(sendbuf));
         }
     }
 }
 void *SSTF(void *arg)
 {
-    Node Mynode;
     pthread_setcancelstate(PTHREAD_CANCEL_ENABLE,NULL);
     pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS,NULL);
     while (1)
-    {
+    {  
         pthread_testcancel();
         usleep(1);
         pthread_testcancel();
         if (!CacheSSTF.empty())
         {
+            pthread_mutex_lock(&mutex);
             Mynode = CacheSSTF.top();
             CacheSSTF.pop();
+            pthread_mutex_unlock(&mutex);
             handle(Mynode);
+            printf("%c %d %d successfully\n",Mynode.com,Mynode.r,Mynode.s);
+
             Write(client_sockfd,sendbuf,strlen(sendbuf));
         }
     }
@@ -434,10 +442,14 @@ void *FCFS(void *arg)
         pthread_testcancel();
         if (!CacheFCFS.empty())
         {
+
+            pthread_mutex_lock(&mutex);
             Mynode = CacheFCFS.front();
             CacheFCFS.pop();
-            printf("%c %d %d successfully\n",Mynode.com,Mynode.r,Mynode.s);
+            pthread_mutex_unlock(&mutex);
+            printf("enter handle %c %d %d\n",Mynode.com,Mynode.r,Mynode.s);
             handle(Mynode);
+            printf("%c %d %d successfully\n",Mynode.com,Mynode.r,Mynode.s);
             Write(client_sockfd,sendbuf,strlen(sendbuf));
         }
     }

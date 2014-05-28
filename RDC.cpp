@@ -94,10 +94,10 @@ int main(int argc,char * argv[])
             tmp = itoa(length,tmp);
             strcat(tmp," ");
             strcat(sendbuf,tmp);
-            for (int i = 0;i < length;++i)
+            for (int i = 0;i < length - 2;++i)
                 tmp[i] = rand() % 10 + '0';
-            tmp[length] = '\n';
-            tmp[length + 1] = 0;
+            tmp[length - 2] = '\n';
+            tmp[length - 1] = 0;
             strcat(sendbuf,tmp);
         }
         printf("%d %s",o,sendbuf);

@@ -6,5 +6,5 @@ BDS:BDS.cpp
 	g++ BDS.cpp -o BDS
 RDC:RDC.cpp
 	g++ RDC.cpp -o RDC -pthread
-IDS:IDS.cpp
+IDS:IDS.cpp server.h
 	g++ IDS.cpp -o IDS -pthread

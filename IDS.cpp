@@ -1,9 +1,7 @@
 #include "server.h"
-
 int main(int argc,char* argv[])
 {
     char *tmpbuf = new char[MAXSIZE];
-
     char *filename = argv[1];
     int port = atoi(argv[5]);
     int amount = atoi(argv[6]);
@@ -70,10 +68,13 @@ int main(int argc,char* argv[])
                                   CacheFCFS.push(Mynode);
                               break;
                     case 'S': while (CacheSSTF.size() > amount);
+                                  pthread_mutex_lock(&mutex);
                                   CacheSSTF.push(Mynode);
+                                  pthread_mutex_unlock(&mutex);
                               break;
                     case 'C': while (CacheC_LOOK.size() > amount);
-                                  CacheC_LOOK.push(Mynode);    
+                                  CacheC_LOOK.push(Mynode);  
+                              break;
                 }
                 p = strtok_r(NULL,"\n",&out_ptr);
             }
