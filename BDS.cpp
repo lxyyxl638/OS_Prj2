@@ -1,4 +1,4 @@
-#include "Project2.h"
+#include "Bserver.h"
 
 int main(int argc,char* argv[])
 {
@@ -14,13 +14,11 @@ int main(int argc,char* argv[])
     long filesize = BLOCKSIZE * sectors * cylinders;
     int result = Lseek(fd,filesize - 1);
 
-    char * diskfile;
     Mmap(diskfile,filesize,fd);
     
     int sockfd = Socket();
     struct sockaddr_in serv_addr;
 
-    int client_sockfd;
     struct sockaddr_in client_addr;
     int nread;
     socklen_t len;
@@ -33,6 +31,7 @@ int main(int argc,char* argv[])
     {
        len = sizeof(client_addr);
        client_sockfd = accept(sockfd,(struct sockaddr *) & client_addr, &len);
+     printf("Connect successfully\n");
        while (1)
        {
              bzero(buf,sizeof(buf));
@@ -43,16 +42,15 @@ int main(int argc,char* argv[])
                  break;
              }
           
-            
-             switch(buf[0])
+          /*   switch(buf[0])
             {
               case 'I':queryI(cylinders,sectors,sendbuf);break;
               case 'R':queryR(diskfile,cylinders,sectors,buf,nowcylinder,delay,sendbuf);break;
               case 'W':queryW(diskfile,cylinders,sectors,buf,nowcylinder,delay,sendbuf);break;
             }
-           
-           // Write(STDOUT_FILENO,sendbuf,strlen(sendbuf)); 
-            Write(client_sockfd,sendbuf,strlen(sendbuf));
+           */
+            Write(client_sockfd,buf,strlen(buf)); 
+           // Write(client_sockfd,sendbuf,strlen(sendbuf));
              
        }
        Close(client_sockfd);
