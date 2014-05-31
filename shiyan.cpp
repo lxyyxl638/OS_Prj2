@@ -18,15 +18,20 @@
 #include <queue>
 #include <vector>
 
+void task(char *str)
+{
+   while (str)
+   {
+        str = strtok(NULL,"C");
+        printf("%s ",str);
+   }
+}
 int main()
 {
-    char *str = new char[10];
-    strcpy(str,"ABCAAJKDF");
-    str = strtok(str,"A");
-    while (str)
-    {
-        printf("%s\n",str);
-        str = strtok(NULL,"A");
-    }
+    char *str = new char[20];
+    strcpy(str,"ABCAAJKCDF");
+    str = strtok(str,"C");
+    printf("%s ",str);
+    task(str);
     return 0;
 }

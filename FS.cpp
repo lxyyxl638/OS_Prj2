@@ -9,7 +9,7 @@ struct Inode
 {
     char Time[BLOCKSIZE],Name[BLOCKSIZE];
     int point[12][2];
-    int parentcylinder,parentsector,c,s,used,flag;
+    int parentcylinder,parentsector,c,s,used,flag,length;
 }
 struct InodeData
 {
@@ -66,17 +66,41 @@ int main(int argc,char* argv[])
                str = strtok(NULL," \n");
                Createfile(str,1);
            }
-           else if (0 == strcmp(str,"rm")) Removefile();
+           else if (0 == strcmp(str,"rm")) 
+           {
+               str = strtok(NULL," \n");
+               Removefile(str,0);
+           }
            else if (0 == strcmp(str,"cd")) 
            {
                str = strtok(NULL," \n");
                Changedir(str);
            }
-           else if (0 == strcmp(str,"rmdir d")) Deletedir();
-           else if (0 == strcmp(str,"ls")) List();
-           else if (0 == strcmp(str,"cat")) Catch();
-           else if (0 == strcmp(str,"w")) WriteData();
-           else if (0 == strcmp(str,"a")) Append();
+           else if (0 == strcmp(str,"rmdir d")) 
+           {
+               str = strtok(NULL," \n");
+               Removefile(str,1);
+           }
+           else if (0 == strcmp(str,"ls")) 
+           {
+               str = strtok(NULL," \n");
+               List(str);
+           }
+           else if (0 == strcmp(str,"cat")) 
+           {
+               str = strtok(NULL," \n");
+               Catchfile(str);
+           }
+           else if (0 == strcmp(str,"w")) 
+           {
+               str = strtok(NULL," \n");
+               WriteData(str);
+           }
+           else if (0 == strcmp(str,"a")) 
+           {
+               str = strtok(NULL," \n");
+               Append(str);
+           }
            else if (0 == strcmp(str,"exit")) Exit();
        }
        Close(client_sockfd);
