@@ -1,8 +1,8 @@
 #include "Fserver.h"
 struct SB
 {
-    int cylinder,sector,inodenum,datanum,InodeBitMapLen,DataBitMapLen,InodeBitBlock,DataBitBlock,usedinode,useddata,rootcylinder,rootsector,blockstart;
     char valid;
+    int cylinder,sector,inodenum,datanum,InodeBitMapLen,DataBitMapLen,InodeBitBlock,DataBitBlock,usedinode,useddata,rootcylinder,rootsector,blockstart;
 };
 
 struct Inode
@@ -20,6 +20,7 @@ char DataBitMap[MAXSIZE],InodeBitMap[MAXSIZE];
 SB SuperBlock;
 Inode CurrentInode,Root;
 InodeData CurrentData,RootData;
+int nowcylinder,nowsector;
 int main(int argc,char* argv[])
 {
     int Port_BDS = atoi(argv[2]);
@@ -48,37 +49,37 @@ int main(int argc,char* argv[])
     while (1)
     {
        len = sizeof(client_addr);
-       client_sockfd = accept(sockfd_FC,(struct sockaddr *) & client_addr, &len);
+       client_sockfd = accept(sockfd_FC,(struct sockaddr *) &client_addr, &len);
        printf("Connect successfully\n");
        while (1)
        {
            Read(client_sockfd,ReceFromFC,MAXSIZE);
            strcpy(str,ReceFromFC);
-           str = strtok(NULL," \n");
+           str = strtok(str," \n");
            if (0 == strcmp(str,"f")) Format();
-           else if (0 == strcmp(str,"mk")) 
+           else if (0 == strcmp(str,"mk"))  /*Create a file*/ 
            {
                str = strtok(NULL," \n")
                Createfile(str,0);
            }
-           else if (0 == strcmp(str,"mkdir")) 
+           else if (0 == strcmp(str,"mkdir")) /*Create a folder*/
            {
                str = strtok(NULL," \n");
                Createfile(str,1);
            }
-           else if (0 == strcmp(str,"rm")) 
+           else if (0 == strcmp(str,"rm")) /*Remove a file*/
            {
                str = strtok(NULL," \n");
                Removefile(str,0);
            }
-           else if (0 == strcmp(str,"cd")) 
+           else if (0 == strcmp(str,"cd")) /*Change path*/
            {
                str = strtok(NULL," \n");
                Changedir(str);
            }
            else if (0 == strcmp(str,"rmdir d")) 
            {
-               str = strtok(NULL," \n");
+               str = strtok(NULL," \n"); /*Remove a folder*/
                Removefile(str,1);
            }
            else if (0 == strcmp(str,"ls")) 
@@ -86,7 +87,7 @@ int main(int argc,char* argv[])
                str = strtok(NULL," \n");
                List(str);
            }
-           else if (0 == strcmp(str,"cat")) 
+           else if (0 == strcmp(str,"cat")) /*Catch a file*/ 
            {
                str = strtok(NULL," \n");
                Catchfile(str);

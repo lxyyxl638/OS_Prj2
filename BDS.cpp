@@ -1,3 +1,5 @@
+/*For my SuperY*/
+/*Never Give Up*/
 #include "Bserver.h"
 
 int main(int argc,char* argv[])
