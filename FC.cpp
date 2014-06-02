@@ -18,6 +18,8 @@ int main(int argc,char * argv[])
 
     connect(sockfd,(struct sockaddr*)&serv_addr,sizeof(serv_addr));
 
+    n = Read(sockfd,buf,MAXSIZE);
+    Write(STDOUT_FILENO,buf,n);
     while (fgets(buf,MAXSIZE,stdin)!= NULL)
     {
         Write(sockfd,buf,strlen(buf));
@@ -26,8 +28,11 @@ int main(int argc,char * argv[])
         if (0 == n)
             printf("The other size has been closed\n");
         else
-            Write(STDOUT_FILENO,buf,n);
-
+          {
+             if (buf[0] != 'c') Write(STDOUT_FILENO,buf,n);
+          }
+           n = Read(sockfd,buf,MAXSIZE);
+           Write(STDOUT_FILENO,buf,n);
     }
     Close(sockfd);
     return 0;

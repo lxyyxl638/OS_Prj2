@@ -1,15 +1,15 @@
 #include "client.h"
 
 pthread_t ntid;
-int sockfd,o;
+
+int sockfd,o,oo = 0;
 char sendbuf[MAXSIZE],recebuf[MAXSIZE];
 
 void *Receive(void * arg)
 {
     int n;
     while (1)
-    {
-       
+    {   
        bzero(recebuf,sizeof(recebuf));
        n = Read(sockfd,recebuf,MAXSIZE);
        if (0 == n)
@@ -18,13 +18,17 @@ void *Receive(void * arg)
            return (void *) 1;
          }
        else
-            Write(STDOUT_FILENO,recebuf,n);
+        {
+             Write(STDOUT_FILENO,recebuf,n);  
+             if (recebuf[0] == 'E') return (void *)1;
+        }
     }
 }
 
 int main(int argc,char * argv[])
 {
     int port = atoi(argv[2]);
+    o = atoi(argv[3]);
     int n,err;
     struct sockaddr_in serv_addr;
     struct hostent *host;
@@ -41,7 +45,6 @@ int main(int argc,char * argv[])
     connect(sockfd,(struct sockaddr*)&serv_addr,sizeof(serv_addr));
 
     srand(time(NULL));
-    o = rand() % 100 + 1;
     ++o;
     printf("The command amount is %d\n",o);
 
@@ -90,19 +93,22 @@ int main(int argc,char * argv[])
             tmp = itoa(s,tmp);
             strcat(tmp," ");
             strcat(sendbuf,tmp);
-            length = rand() % 256 + 1;
+            length = rand() % 100 + 1;
             tmp = itoa(length,tmp);
             strcat(tmp," ");
             strcat(sendbuf,tmp);
-            for (int i = 0;i < length - 2;++i)
+            for (int i = 0;i < length;++i)
                 tmp[i] = rand() % 10 + '0';
-            tmp[length - 2] = '\n';
-            tmp[length - 1] = 0;
             strcat(sendbuf,tmp);
+            strcat(sendbuf,"\n");
         }
         printf("%d %s",o,sendbuf);
         Write(sockfd,sendbuf,strlen(sendbuf));
     }
+    bzero(sendbuf,sizeof(sendbuf));
+    strcat(sendbuf,"EXIT\n");
+    Write(sockfd,sendbuf,strlen(sendbuf));
+    printf("EXIT\n");
     pthread_join(ntid,NULL);
     Close(sockfd);
     return 0;

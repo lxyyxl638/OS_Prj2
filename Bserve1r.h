@@ -17,6 +17,7 @@
 #include <ctime>
 #include <queue>
 #include <vector>
+
 const int MAXSIZE = 8192;
 const int BLOCKSIZE = 256;
 int cylinders,sectors,delay,nowcylinder = 0;
@@ -30,9 +31,8 @@ struct Node
     int r,s,len;
     char data[MAXSIZE];
 };
-
-
 Node Mynode;
+
 int Open(char* filename)
 {
     int fd = open(filename,O_RDWR|O_CREAT,0);
@@ -197,7 +197,8 @@ void init(char *p,Node & Mynode)
         {
             p = strtok_r(NULL," ",&in_ptr);
             Mynode.len = atoi(p);
-            strcpy(Mynode.data,in_ptr);
+            p = strtok_r(NULL," ",&in_ptr);
+            strcpy(Mynode.data,p);
         }
     }
 }
@@ -207,7 +208,10 @@ void handle(Node Mynode)
     char str[MAXSIZE];
     int len,time;
 
+    printf("Enter Handle\n");
+    printf("%c %d %d\n",Mynode.com,Mynode.r,Mynode.s);
     bzero(sendbuf,sizeof(sendbuf));
+    printf("OK!\n");
     if (Mynode.com == 'I')
     {
         itoa(cylinders,str);
@@ -224,29 +228,36 @@ void handle(Node Mynode)
         if (Mynode.r >= cylinders || Mynode.s >= sectors)
         {
             strcat(sendbuf,"No\n");
+        //    printf("Wrong\n");
+            Write(client_sockfd,sendbuf,strlen(sendbuf));
             return;
         }
         else
         {
+            printf("%c %d %d\n",Mynode.com,Mynode.r,Mynode.s);
             switch (Mynode.com)
             {
-                case 'R':
-                        //strcat(sendbuf,"Yes ");
+                case 'R'://strcat(sendbuf,"Yes ");
+                         printf("%d %d %d\n",Mynode.r,sectors,Mynode.s);
+
                          memcpy(sendbuf,&diskfile[BLOCKSIZE * (Mynode.r * sectors + Mynode.s)],BLOCKSIZE);
-                         strcat(sendbuf,"\n");
+                         
+                         //strcat(sendbuf,"\n");    
+                         printf("%d %d %d ok\n",Mynode.r,sectors,Mynode.s);
+                         Write(client_sockfd,sendbuf,strlen(sendbuf));
                          break;
-                case 'W': 
-                         strcat(sendbuf,"Yes\n");
+                case 'W':
+                         printf("%c %d %d %s\n",Mynode.com,Mynode.r,Mynode.s,Mynode.data);
+                         strcat(sendbuf,"Yes\n");                 
+                         printf("In handle %s\n",sendbuf);
                          memcpy(&diskfile[BLOCKSIZE * (Mynode.r * sectors + Mynode.s)],Mynode.data,strlen(Mynode.data));
+                         Write(client_sockfd,sendbuf,strlen(sendbuf));
                          break;
             }
+            time = abs(Mynode.r - nowcylinder) * delay;
+            usleep(time);
+            nowcylinder = Mynode.r;
         }
-
-        Write(client_sockfd,sendbuf,strlen(sendbuf));
-        time = abs(Mynode.r - nowcylinder) * delay;
-        usleep(time);
-        nowcylinder = Mynode.r;
     }
-
 }
 

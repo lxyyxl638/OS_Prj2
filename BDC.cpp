@@ -1,4 +1,5 @@
-#include "Project2.h"
+#include "client.h"
+
 int main(int argc,char * argv[])
 {
     int sockfd;
@@ -19,6 +20,11 @@ int main(int argc,char * argv[])
 
     while (fgets(buf,MAXSIZE,stdin)!= NULL)
     {
+        if (buf[0] == 'I' && strlen(buf) > 2)
+        {
+             printf("No such Command\n");
+             continue;    
+        }
         Write(sockfd,buf,strlen(buf));
         bzero(buf,sizeof(buf));
         n = Read(sockfd,buf,MAXSIZE);
@@ -26,6 +32,7 @@ int main(int argc,char * argv[])
             printf("The other size has been closed\n");
         else
             Write(STDOUT_FILENO,buf,n);
+        
 
     }
     Close(sockfd);

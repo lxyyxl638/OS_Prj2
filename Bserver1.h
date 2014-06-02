@@ -231,7 +231,7 @@ void handle(Node Mynode)
             switch (Mynode.com)
             {
                 case 'R':
-                        //strcat(sendbuf,"Yes ");
+                        strcat(sendbuf,"Yes ");
                          memcpy(sendbuf,&diskfile[BLOCKSIZE * (Mynode.r * sectors + Mynode.s)],BLOCKSIZE);
                          strcat(sendbuf,"\n");
                          break;
@@ -242,10 +242,10 @@ void handle(Node Mynode)
             }
         }
 
-        Write(client_sockfd,sendbuf,strlen(sendbuf));
         time = abs(Mynode.r - nowcylinder) * delay;
         usleep(time);
         nowcylinder = Mynode.r;
+        Write(client_sockfd,sendbuf,strlen(sendbuf));
     }
 
 }

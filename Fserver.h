@@ -19,12 +19,32 @@
 #include <vector>
 const int MAXSIZE = 8192;
 const int BLOCKSIZE = 256;
-int cylinders,sectors,delay,nowcylinder = 0;
-
 char ReceFromFC[MAXSIZE],SendToFC[MAXSIZE],ReceFromBDS[MAXSIZE],SendToBDS[MAXSIZE];
 int client_sockfd,sockfd_BDS,sockfd_FC;
 
+struct SB
+{
+    char valid;
+    int cylinder,sector,inodenum,datanum,InodeBitMapLen,DataBitMapLen,InodeBitBlock,DataBitBlock,usedinode,useddata,rootcylinder,rootsector,blockstart;
+};
 
+struct Inode
+{
+    char Time[BLOCKSIZE],Name[BLOCKSIZE];
+    int point[12][2];
+    int parentcylinder,parentsector,c,s,used,flag,length;
+};
+struct InodeData
+{
+    char Name[BLOCKSIZE][BLOCKSIZE];
+    int c[BLOCKSIZE],s[BLOCKSIZE],amount;
+};
+char DataBitMap[100000],InodeBitMap[100000];
+SB SuperBlock;
+Inode CurrentInode,Root,NewInode;
+InodeData CurrentData,RootData,NewData;
+
+int nowcylinder,nowsector;
 int Socket()
 {
     int sockfd = socket(AF_INET,SOCK_STREAM,0);
@@ -96,20 +116,78 @@ void Close(int fd)
     }
 }
 
-char *itoa(int x,char *str)
+void Show(Inode MyInode,InodeData MyData)
 {
-    int div = 1,tmp,k = 0;
-    bzero(str,sizeof(str));
-    while (div <= x) div *= 10;
-    div /= 10;
-    while (x > 0 || div > 0)
+    printf("MyInode Time %s\n",MyInode.Time);
+    printf("MyInode Name %s\n",MyInode.Name);
+    printf("MyInode parentc %d\n",MyInode.parentcylinder);
+    printf("MyInode parents %d\n",MyInode.parentsector);
+    printf("MyInode c %d\n",MyInode.c);
+    printf("MyInode s %d\n",MyInode.s);
+    printf("MyInode used %d\n",MyInode.used);
+    printf("MyInode flag %d\n",MyInode.flag);
+    printf("MyInode length %d\n",MyInode.length);
+
+    printf("MyData %d\n",MyData.amount);
+    for (int i = 0;i < MyData.amount;++i)
+        printf("%s %d %d\n",MyData.Name[i],MyData.c[i],MyData.s[i]);
+}
+void Display()
+{
+    printf("SuperBlock cylinder %d\n",SuperBlock.cylinder);
+    printf("SuperBlock sector %d\n",SuperBlock.sector);
+    printf("SuperBlock inodenum %d\n",SuperBlock.inodenum);
+    printf("SuperBlock datanum %d\n",SuperBlock.datanum);
+    printf("SuperBlock InodeBitMapLen %d\n",SuperBlock.InodeBitMapLen);
+    printf("SuperBlock DataBitMapLen %d\n",SuperBlock.DataBitMapLen);
+    printf("SuperBlock InodeBitBlock %d\n",SuperBlock.InodeBitBlock);
+    printf("SuperBlock DataBitBlock %d\n",SuperBlock.DataBitBlock);
+    printf("SuperBlock usedinode %d\n",SuperBlock.usedinode);
+    printf("SuperBlock useddata %d\n",SuperBlock.useddata);
+    printf("SuperBlock rootcylinder %d\n",SuperBlock.rootcylinder);
+    printf("SuperBlock rootsector %d\n",SuperBlock.rootsector);
+    printf("SuperBlock blockstart %d\n",SuperBlock.blockstart);
+    printf("\n");
+    for (int i = 0; i < SuperBlock.InodeBitMapLen;++i)
+        printf("%c ",InodeBitMap[i]);
+    printf("\n");
+    for (int i = 0; i < SuperBlock.DataBitMapLen;++i)
+        printf("%c ",DataBitMap[i]);
+    printf("\n");
+    printf("CurrentInode Time %s\n",CurrentInode.Time);
+    printf("CurrentInode Name %s\n",CurrentInode.Name);
+    printf("CurrentInode parentc %d\n",CurrentInode.parentcylinder);
+    printf("CurrentInode parents %d\n",CurrentInode.parentsector);
+    printf("CurrentInode c %d\n",CurrentInode.c);
+    printf("CurrentInode s %d\n",CurrentInode.s);
+    printf("CurrentInode used %d\n",CurrentInode.used);
+    printf("CurrentInode flag %d\n",CurrentInode.flag);
+    printf("CurrentInode length %d\n",CurrentInode.length);
+}
+char * itoa(int num,char *str)
+{
+    char index[]="0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    int i = 0,j,k;
+    unsigned unum;
+
+    unum=(unsigned) num;/*其他情况*/
+    /*转换*/
+    do{
+        str[i++] = index[ unum % (unsigned) 10];
+        unum /= 10;
+    }while(unum);
+
+    str[i]='\0';
+    /*逆序*/
+    k=0;
+    char temp;
+    for(j = k;j <= (i-1)/2; j++)
     {
-        tmp = x;
-        str[k++] = (tmp / div) + '0';
-        x %= div;
-        div = div / 10;
+        temp = str[j];
+        str[j] = str[i-1+k-j];
+        str[i-1+k-j] = temp;
     }
-    return str; 
+    return str;
 }
 
 int geti(char *str,int & result)
@@ -131,10 +209,19 @@ int geti(char *str,int & result)
     return i;
 }
 
-void HandleError(char *str)
+void HandleError(const char * const str)
 {
-    printf("%s",str);
+    bzero(SendToFC,sizeof(SendToFC));
+    strcpy(SendToFC,str);
+    Write(client_sockfd,SendToFC,strlen(SendToFC));
     return;
+}
+bool WriteSuccess()
+{
+    bzero(ReceFromBDS,sizeof(ReceFromBDS));
+    Read(sockfd_BDS,ReceFromBDS,MAXSIZE);
+    if (ReceFromBDS[0] == 'Y') return true;
+    else return false;
 }
 void Next(int &cylinder,int &sector)
 {
@@ -146,103 +233,158 @@ void Next(int &cylinder,int &sector)
     }
     return;
 }
-void GetBlock(InodeData &NewData,int &Acylinder,int &Asector)
+bool GetBlock(InodeData &NewData,int &Acylinder,int &Asector)
 {
-    int k;
+    int k = -1;
     for (int i = 0;i < SuperBlock.DataBitMapLen;++i) 
-        if (DataBitMap[i] == 0)
+        if (DataBitMap[i] == '0')
         {
             k = i;
             break;
         }
-    DataBitMap[k] = 1;
+    if (k < 0) return 0; 
+    DataBitMap[k] = '1';
     k = k + SuperBlock.blockstart;
-    Acylinder = k / BLOCKSIZE;
-    Asector = k % BLOCKSIZE;
+    Acylinder = k / SuperBlock.sector;
+    Asector = k % SuperBlock.sector;
     NewData.amount = 0;
+    return 1;
 }
 
 void ReadOrder(int cylinder,int sector)
 {
-    char tmp[10];
+    char *tmp = new char[MAXSIZE];
+
     bzero(SendToBDS,sizeof(SendToBDS));
     strcat(SendToBDS,"R ");
-    tmp = itoa(cylinder);
+    tmp = itoa(cylinder,tmp);
     strcat(SendToBDS,tmp);
     strcat(SendToBDS," ");
-    tmp = itoa(sector);
+    tmp = itoa(sector,tmp);
     strcat(SendToBDS,tmp);
     strcat(SendToBDS,"\n");
     Write(sockfd_BDS,SendToBDS,strlen(SendToBDS));
+    
+    bzero(ReceFromBDS,sizeof(ReceFromBDS));
     Read(sockfd_BDS,ReceFromBDS,MAXSIZE);
+    delete tmp;
 }
 void ReadInode(Inode & Mynode,int c,int s)
 {
-    char str[MAXSIZE];
+    char *str = new char[MAXSIZE],*tmp;
+    char *RI = NULL;
+
     ReadOrder(c,s);
     strcpy(str,ReceFromBDS);
-    str = strtok(str," \n");
-    strcpy(Mynode.Time,str);
-    str = strtok(NULL," \n");
+    tmp = str;
+    strncpy(Mynode.Time,str,24);
+    
+    printf("%s\n",tmp);
+    str = strtok_r(&str[25]," \n",&RI);
     strcpy(Mynode.Name,str);
-    str = strtok(NULL," \n");
+    str = strtok_r(NULL," \n",&RI);
     Mynode.parentcylinder = atoi(str);
-    str = strtok(NULL," \n");
+    str = strtok_r(NULL," \n",&RI);
     Mynode.parentsector = atoi(str);
-    str = strtok(NULL," \n");
+    str = strtok_r(NULL," \n",&RI);
     Mynode.c = atoi(str);
-    str = strtok(NULL," \n");
+    str = strtok_r(NULL," \n",&RI);
     Mynode.s = atoi(str);
-    str = strtok(NULL," \n");
+    str = strtok_r(NULL," \n",&RI);
     Mynode.used = atoi(str);
-    str = strtok(NULL," \n");
+    str = strtok_r(NULL," \n",&RI);
     Mynode.flag = atoi(str);
-    str = strtok(NULL," \n");
+    str = strtok_r(NULL," \n",&RI);
     Mynode.length = atoi(str);
     for (int i = 0;i < Mynode.used;++i)
     {     
-        str = strtok(NULL," \n");
+        str = strtok_r(NULL," \n",&RI);
         Mynode.point[i][0] = atoi(str);
-        str = strtok(NULL," \n");
+        str = strtok_r(NULL," \n",&RI);
         Mynode.point[i][1] = atoi(str);
     }
+    delete tmp;
 }
-void ReadInodeData(InodeData & MyData,Inode Mynode)
+void ReadInodeData(InodeData& MyData,Inode & Mynode)
 {
-    char str[MAXSIZE];
+    char *str = new char[MAXSIZE],*tmp;
+    char *RID = NULL;
 
     ReadOrder(Mynode.point[0][0],Mynode.point[0][1]);
+
     strcpy(str,ReceFromBDS);
-    str = strtok(str," \n");
+    tmp = str;
+    str = strtok_r(str," \n",&RID);
     MyData.amount = atoi(str);
+
     for (int i = 0;i < MyData.amount;++i)
     {
-        str = strtok(str," \n");
+        str = strtok_r(NULL," \n",&RID);
         strcpy(MyData.Name[i],str);
 
-        str = strtok(str," \n");
+        str = strtok_r(NULL," \n",&RID);
         MyData.c[i] = atoi(str);
-        str = strtok(str," \n");
+        str = strtok_r(NULL," \n",&RID);
         MyData.s[i] = atoi(str);
     }
+
+    delete tmp;
+}
+
+bool GetInode(Inode & NewInode, char const *filename,int Choice)
+{
+    int k = -1;
+    for (int i = 0;i < SuperBlock.InodeBitMapLen;++i) 
+        if (InodeBitMap[i] == '0')
+        {
+            k = i;
+            break;
+        }
+    if (k < 0) 
+    {
+        HandleError("Inode is not enough\n");
+        return 0;
+    }
+
+    InodeBitMap[k] = '1';
+ /*   time_t t;
+    t = time(&t);
+    strncpy(NewInode.Time,ctime(&t),24);
+*/
+    strcpy(NewInode.Name,filename);
+    NewInode.c = k / SuperBlock.sector;
+    NewInode.s = k % SuperBlock.sector;
+    NewInode.parentcylinder = CurrentInode.c;
+    NewInode.parentsector = CurrentInode.s;
+    NewInode.used = 0;
+    NewInode.flag = Choice;
+    NewInode.length = 0;
+    return 1;
 }
 void initial()
 {
-    char str[MAXSIZE];
-
+    char *str = new char[MAXSIZE],*p;
+    int tmp,local,Acylinder,Asector,k;
     nowcylinder = 0;
     nowsector = 0;
     bzero(SendToBDS,sizeof(SendToBDS));
     strcat(SendToBDS,"R 0 0\n");
     Write(sockfd_BDS,SendToBDS,strlen(SendToBDS)); 
+    bzero(ReceFromBDS,sizeof(ReceFromBDS));
     Read(sockfd_BDS,ReceFromBDS,MAXSIZE);
-    if (ReceFromBDS[0] != '0')
+    Write(STDOUT_FILENO,ReceFromBDS,strlen(ReceFromBDS));
+    bzero(InodeBitMap,sizeof(InodeBitMap));
+    bzero(DataBitMap,sizeof(DataBitMap));
+    if (ReceFromBDS[0] != '1')
     {
+        bzero(SendToBDS,sizeof(SendToBDS));
         strcat(SendToBDS,"I\n");
         Write(sockfd_BDS,SendToBDS,strlen(SendToBDS));
+        bzero(ReceFromBDS,sizeof(ReceFromBDS));
         Read(sockfd_BDS,ReceFromBDS,MAXSIZE);
-        strcpy(str,ReceFromBDS);
 
+        strcpy(str,ReceFromBDS);
+        p = str;
         str = strtok(str," \n");
         SuperBlock.cylinder = atoi(str);
         str = strtok(str," \n");
@@ -251,15 +393,14 @@ void initial()
         SuperBlock.datanum = SuperBlock.cylinder * SuperBlock.sector - SuperBlock.inodenum;
 
         SuperBlock.blockstart = SuperBlock.inodenum;
-        SuperBlock.InodeBitMapLen = SuperBlock.inodenum / 8;
-        if (SuperBlock.inodenum % 8 > 0) ++SuperBlock.InodeBitMapLen;
-        for (int i = 0;i < SuperBlock.InodeBitMapLen;++i)
-            InodeBitMap[i] = 0;
+        SuperBlock.InodeBitMapLen = SuperBlock.inodenum;
 
-        SuperBlock.DataBitLen = SuperBlock.datanum / 8;
-        if (SuperBlock.datanum % 8 > 0) ++SuperBlock.DataBitLen;
-        for (int i = 0;i < SuperBlock.DataBitLen;++i)
-            DataBitMap[i] = 0;
+        for (int i = 0;i < SuperBlock.InodeBitMapLen;++i)
+            InodeBitMap[i] = '0';
+
+        SuperBlock.DataBitMapLen = SuperBlock.datanum;
+        for (int i = 0;i < SuperBlock.DataBitMapLen;++i)
+            DataBitMap[i] = '0';
 
         SuperBlock.InodeBitBlock = SuperBlock.InodeBitMapLen / BLOCKSIZE;
         if (SuperBlock.InodeBitMapLen % BLOCKSIZE > 0) ++SuperBlock.InodeBitBlock;
@@ -269,28 +410,20 @@ void initial()
 
         SuperBlock.valid = '1';
 
+
         /*将BitMap 和superBlock的inode块标记为已用*/
         SuperBlock.usedinode = 1 + SuperBlock.InodeBitBlock + SuperBlock.DataBitBlock;
         SuperBlock.useddata = 0;
         for (int i = 0;i < SuperBlock.usedinode;++i)
-        {
-            tmp = i / 8;
-            local = 8 - (i - (i / 8) * 8);
-            InodeBitMap[tmp] = InodeBitMap[tmp] | (1 << (local - 1));
-        }
+            InodeBitMap[i] = '1';
+
         for (int i = 0;i < SuperBlock.usedinode;++i)
             Next(nowcylinder,nowsector);
 
         /*建立根目录*/
-        SuperBlock.rootcylinder = nowcylinder;
-        SuperBlock.rootsector = nowsector;
-        ++SuperBlock.useddata;
-        DataBitMap[0] = DataBitMap[0] | (1 << 7);
-
-        time_t t;
-        t = time(&t);
-        strcpy(Root.Time,ctime(&t));
-        strcpy(Root.Name,"/");
+        if (!GetInode(Root,"/",1)) return;
+        SuperBlock.rootcylinder = Root.c;
+        SuperBlock.rootsector = Root.s;
         Acylinder = 0;
         Asector = 0;
         GetBlock(RootData,Acylinder,Asector);
@@ -299,18 +432,16 @@ void initial()
         Root.point[0][1] = Asector;
         Root.parentcylinder = 0;
         Root.parentsector = 0;
-        Root.flag = 1;       /*这是个文件夹*/
-        Root.c = nowcylinder;
-        Root.s = nowsector;
         CurrentInode = Root;
         CurrentData = RootData;
     }
     else
     {
         strcpy(str,ReceFromBDS);
+        p = str;
         str = strtok(str," \n");
         SuperBlock.valid = str[0];
-        str = strtok(str," \n");
+        str = strtok(NULL," \n");
         SuperBlock.cylinder = atoi(str);
         str = strtok(NULL," \n");
         SuperBlock.sector = atoi(str);
@@ -342,7 +473,6 @@ void initial()
         {
             Next(nowcylinder,nowsector);
             ReadOrder(nowcylinder,nowsector);
-            Read(sockfd_BDS,ReceFromBDS,BLOCKSIZE);
             for (int j = 0;j < BLOCKSIZE;++j)
             {
                 if (k >= SuperBlock.InodeBitMapLen) break;
@@ -350,12 +480,12 @@ void initial()
                 ++k;
             }
         }
+
         k = 0;
         for (int i = 0;i < SuperBlock.DataBitBlock;++i)
         {
             Next(nowcylinder,nowsector);
             ReadOrder(nowcylinder,nowsector);
-            Write(sockfd_BDS,ReceFromBDS,BLOCKSIZE);
             for (int j = 0;j < BLOCKSIZE;++j)
             {
                 if (k >= SuperBlock.DataBitMapLen) break;
@@ -368,6 +498,8 @@ void initial()
     }
     CurrentInode = Root;
     CurrentData = RootData;
+    delete p;
+
     return;
 }
 
@@ -377,11 +509,14 @@ void Format()
     strcpy(SendToBDS,"W 0 0 1 0\n");
     Write(sockfd_BDS,SendToBDS,BLOCKSIZE);
     initial();
+    bzero(SendToFC,sizeof(SendToFC));
+    strcat(SendToFC,"Format Successfully");
+    Write(client_sockfd,SendToFC,strlen(SendToFC));
 }
 
-bool EnterFile(Inode & Mynode,Inode & MyData,char *path)
+bool EnterFile(Inode &Mynode,InodeData & MyData,char*path)
 {
-    int k = -1;
+    int k = -1,c,s;
     for (int i = 0;i < MyData.amount;++i)
         if (0 == strcmp(path,MyData.Name[i]))
         {
@@ -391,98 +526,137 @@ bool EnterFile(Inode & Mynode,Inode & MyData,char *path)
     if (k < 0) 
     {
         HandleError("No such file exists\n");
-        return 0;
+        return false;
     }
     c = MyData.c[k];
     s = MyData.s[k];
+
     ReadInode(Mynode,c,s);
-    ReadInodeData(Mynode);
     if (0 == Mynode.flag)
     {
         HandleError("No such file exists\n");
         return 0;
     }
-    return 1;    
+    ReadInodeData(MyData,Mynode);
+    
+    return true;    
 }
 void WriteBack(Inode & MyInode,InodeData & MyData)
 {
-    char info[MAXSIZE],tmp[BLOCKSIZE];
+    char *info = new char[MAXSIZE];
+    char *tmp = new char[MAXSIZE];
 
     bzero(SendToBDS,sizeof(SendToBDS));
     strcat(SendToBDS,"W ");
-    tmp = itoa(MyInode.c);
+    tmp = itoa(MyInode.c,tmp);
     strcat(SendToBDS,tmp);
     strcat(SendToBDS," ");
-    tmp = itoa(MyInode,s);
+    tmp = itoa(MyInode.s,tmp);
     strcat(SendToBDS,tmp);
     strcat(SendToBDS," ");
     bzero(info,sizeof(info));
+    for (int i = 0;i < strlen(MyInode.Time);++i)
+        if ('\n' == MyInode.Time[i])
+        {
+            MyInode.Time[i] = 0;
+            break;
+        }
+    int k ;
+    while (strlen(MyInode.Time) < 24)
+    {
+        k = strlen(MyInode.Time);
+        MyInode.Time[k] = 'x';
+        MyInode.Time[k + 1] = 0;
+    }
     strcat(info,MyInode.Time);
     strcat(info," ");
     strcat(info,MyInode.Name);
     strcat(info," ");
-    strcat(info,MyInode.parentcylinder);
-    strcat(info," ");
-    strcat(info,MyInode.parentsector);
-    strcat(info," ");
-    tmp = itoa(MyInode.c);
+
+    tmp = itoa(MyInode.parentcylinder,tmp);
     strcat(info,tmp);
     strcat(info," ");
-    tmp = itoa(MyInode.s);
+
+    tmp = itoa(MyInode.parentsector,tmp);
     strcat(info,tmp);
     strcat(info," ");
-    tmp = itoa(MyInode.used);
+
+    tmp = itoa(MyInode.c,tmp);
     strcat(info,tmp);
     strcat(info," ");
-    tmp = itoa(MyInode.flag);
+
+    tmp = itoa(MyInode.s,tmp);
     strcat(info,tmp);
     strcat(info," ");
-    tmp = itoa(MyINode.length);
+
+    tmp = itoa(MyInode.used,tmp);
+    strcat(info,tmp);
+    strcat(info," ");
+
+    tmp = itoa(MyInode.flag,tmp);
+    strcat(info,tmp);
+    strcat(info," ");
+
+    tmp = itoa(MyInode.length,tmp);
     strcat(info,tmp);
     strcat(info," ");
     for (int i = 0;i < MyInode.used;++i)
     {
-        tmp = itoa(MyInode.point[i][0]);
+        tmp = itoa(MyInode.point[i][0],tmp);
         strcat(info,tmp);
         strcat(info," ");
-        tmp = itoa(MyInode.point[i][1]);
+        tmp = itoa(MyInode.point[i][1],tmp);
         strcat(info,tmp);
         strcat(info," ");
     }
-    strcat(SendToBDS,itoa(strlen(info)));
+    strcat(SendToBDS,itoa(strlen(info),tmp));
     strcat(SendToBDS," ");
     strcat(SendToBDS,info);
+    strcat(SendToBDS,"\n");
     Write(sockfd_BDS,SendToBDS,strlen(SendToBDS));
+    if (!WriteSuccess())
+    {
+        HandleError("Write error\n");
+        return;
+    };
     if (MyInode.flag == 1)
     {
         bzero(SendToBDS,sizeof(SendToBDS));
         bzero(info,sizeof(info));
-        tmp = itoa(MyInode.point[0][0]);
+        tmp = itoa(MyInode.point[0][0],tmp);
         strcat(SendToBDS,"W ");
         strcat(SendToBDS,tmp);
         strcat(SendToBDS," ");
-        tmp = itoa(MyInode.point[0][1]);
+        tmp = itoa(MyInode.point[0][1],tmp);
         strcat(SendToBDS,tmp);
         strcat(SendToBDS," ");
-        tmp = itoa(MyInode.amount);
+        tmp = itoa(MyData.amount,tmp);
         strcat(info,tmp);
         strcat(info," ");
         for (int i = 0;i < MyData.amount;++i)
         {
-            strcat(info,Name[i]);
+            strcat(info,MyData.Name[i]);
             strcat(info," ");
-            tmp = itoa(MyData.c[i]);
+            tmp = itoa(MyData.c[i],tmp);
             strcat(info,tmp);
             strcat(info," ");
-            tmp = itoa(MyData.s[i]);
+            tmp = itoa(MyData.s[i],tmp);
             strcat(info,tmp);
             strcat(info," ");
         }
-        strcat(SendToBDS,itoa(strlen(info)));
+        strcat(SendToBDS,itoa(strlen(info),tmp));
         strcat(SendToBDS," ");
         strcat(SendToBDS,info);
+        strcat(SendToBDS,"\n");
         Write(sockfd_BDS,SendToBDS,strlen(SendToBDS));
+        if (!WriteSuccess())
+        {
+            HandleError("Write error\n");
+            return;
+        };
     }
+    delete info;
+    delete tmp;
     return;
 }
 int Changedir(char *path)
@@ -490,6 +664,8 @@ int Changedir(char *path)
     bool Check;
     Inode TmpInode;
     InodeData TmpData;
+    char *CD = NULL;
+
     if (strlen(path) == 1 && path[0] == '.') return 1;
     else
     {
@@ -497,7 +673,7 @@ int Changedir(char *path)
         {
             ReadInode(TmpInode,SuperBlock.rootcylinder,SuperBlock.rootsector);
             ReadInodeData(TmpData,TmpInode);
-            path = strtok(&path[1],"/");
+            path = strtok_r(&path[1],"/",&CD);
             while (path)
             {
                 Check = EnterFile(TmpInode,TmpData,path);
@@ -506,7 +682,7 @@ int Changedir(char *path)
                     HandleError("No such file or directory\n");
                     return 0;
                 }
-                path = strtok(NULL,"/");
+                path = strtok_r(NULL,"/",&CD);
             }
         }
         else
@@ -515,7 +691,7 @@ int Changedir(char *path)
             TmpData = CurrentData;
             if (0 == strcmp(path,".."))
             {
-                if (TmpIode.c == SuperBlock.rootcylinder && TmpInode.s == SuperBlock.rootsector)
+                if (TmpInode.c == SuperBlock.rootcylinder && TmpInode.s == SuperBlock.rootsector)
                 {
                     HandleError("No such file exists\n");
                     return 0;
@@ -525,49 +701,31 @@ int Changedir(char *path)
             }
             else
             {
-                path = strtok(path,"/");
+                path = strtok_r(path,"/",&CD);
                 while (path)
                 {
-                    Check = EnterFile(tmpinode,tmpdata,path);
+                    Check = EnterFile(TmpInode,TmpData,path);
                     if (!Check)
                     {
                         HandleError("No such file or directory\n");
                         return 0;
                     }
-                    path = strtok(NULL,"/");
+                    path = strtok_r(NULL,"/",&CD);
                 }
             }
         }
     }
 
     WriteBack(CurrentInode,CurrentData);
-    CurrentInode = tmpinode;
-    CurrentData = tmpdata;
+    CurrentInode = TmpInode;
+    CurrentData = TmpData;
+    Show(CurrentInode,CurrentData);
     return 1;
 }
 
-void GetInode(Inode & NewInode,int Choice)
-{
-    int k;
-    for (int i = 0;i < SuperBlock.InodeBitMapLen;++i) 
-        if (InodeBitMap[i] == 0)
-        {
-            k = i;
-            break;
-        }
-    InodeBitMap[k] = 1;
-    NewInode.c = k / BLOCKSIZE;
-    NewInode.s = k % BLOCKSIZE;
-    NewInode.parentcylinder = CurrentInode.c;
-    NewInode.parentsector = CurrentInode.s;
-    NewInode.used = 0;
-    NewInode.flag = Choice;
-    NewInode.length = 0;
-}
 
 int Create(char *filename,int Choice)
 {
-    Inode NewInode;
 
     for (int i = 0; i < CurrentData.amount;++i)
         if (!strcmp(CurrentData.Name[i],filename))
@@ -576,25 +734,17 @@ int Create(char *filename,int Choice)
             return 0;
         }
 
-    if (!GetInode(NewInode,Choice))
-    {
-        HandleError("The inode is not enoutgh\n");
-        return 0;
-    }
-    strcpy(CurrentData.Name[Current.amount],filename);
+    if (!GetInode(NewInode,filename,Choice))  return 0;
+    strncpy(CurrentData.Name[CurrentData.amount],filename,strlen(filename));
     CurrentData.c[CurrentData.amount] = NewInode.c;
     CurrentData.s[CurrentData.amount] = NewInode.s;
     ++CurrentData.amount;
-    strcpy(NewInode.Name,filename);
+
     if (1 == Choice)
     {
-        InodeData NewData;
         int Acylinder,Asector;
-        if (!GetBlock(NewData,Acylinder,Asector))
-        {
-            HandleError("No enough DataBlock\n");
-            return 0;
-        };
+        if (!GetBlock(NewData,Acylinder,Asector))  return 0;
+        NewInode.used = 1;
         NewInode.point[0][0] = Acylinder;
         NewInode.point[0][1] = Asector;
     }
@@ -621,14 +771,14 @@ void Createfile(char *path,int Choice)
     strcpy(filename,&path[k + 1]);
     TempInode = CurrentInode;
     TempData = CurrentData;
-    if (filename == NULL || !Changedir(path))
+    if (k > -1 && (filename == NULL || !Changedir(path)))
     {
-        HandleError("No such file or directory\n");
+        HandleError("2:No such directory\n");
         return;
     };
     if (!Create(filename,Choice))  
     {
-        HandleError("No such file or directory\n");
+        HandleError("1:No such file or directory\n");
         if (k > -1)
         {
             CurrentInode = TempInode;
@@ -636,43 +786,117 @@ void Createfile(char *path,int Choice)
         }
         return;
     }
+    bzero(SendToFC,sizeof(SendToFC));
+    strcpy(SendToFC,"0:successfully create the file\n");
+    Write(client_sockfd,SendToFC,strlen(SendToFC));
+    return ;
+}
+
+
+int Remove(char *filename,int Choice)
+{
+    int k = -1;
+    for (int i = 0; i < CurrentData.amount;++i)
+        if (!strcmp(CurrentData.Name[i],filename))
+        {
+            k = i;
+            break;
+        }
+
+    if (-1 == k) return 0;
+    --CurrentData.amount;
+    strcpy(CurrentData.Name[k],CurrentData.Name[CurrentData.amount]);
+    CurrentData.c[k] = CurrentData.c[CurrentData.amount];
+    CurrentData.s[k] = CurrentData.s[CurrentData.amount];
+    WriteBack(CurrentInode,CurrentData);
+
+    return 1;
+}
+void Removefile(char *path,int Choice)
+{
+    int k = -1;
+    char filename[BLOCKSIZE];
+    Inode TempInode;
+    InodeData TempData;
+
+    for (int i = strlen(path);i >= 0;--i)
+        if ('/' == path[i]) 
+        {
+            k = i;
+            path[k] = 0;
+            break;
+        }
+
+    strcpy(filename,&path[k + 1]);
+    TempInode = CurrentInode;
+    TempData = CurrentData;
+    if (k > -1 && (filename == NULL || !Changedir(path)))
+    {
+        HandleError("1:No such directory\n");
+        return;
+    };
+    if (!Remove(filename,Choice))  
+    {
+        HandleError("1:No such file or directory\n");
+        if (k > -1)
+        {
+            CurrentInode = TempInode;
+            CurrentData = TempData;
+        }
+        return;
+    }
+    bzero(SendToFC,sizeof(SendToFC));
+    strcpy(SendToFC,"0:successfully remove the file\n");
+    Write(client_sockfd,SendToFC,strlen(SendToFC));
+    return ;
 }
 void List(char *argument)
 {
-    char str[10];
+    char *str = new char [MAXSIZE];
     Inode TmpInode;
-    if (argument[0] == '0')
+    
+    if (0 == CurrentData.amount)
     {
         bzero(SendToFC,sizeof(SendToFC));
-        for (int i = 0;i < CurrentData.amount;++i)
-        {
-            strcat(SendToFC,CurrentData.Name[i]);
-            strcat(SendToFC,"\n");
-        }
-        Write(client_fd,SendToFC,strlen(SendToFC));
+        strcat(SendToFC,"\n");
+        Write(client_sockfd,SendToFC,strlen(SendToFC));
     }
     else
     {
-        bzero(SendToFC,sizeof(SendToFC));
-        for (int i = 0;i < CurrentData.amount;++i)
+        if (argument[0] == '0')
         {
-            strcat(SendToFC,Name[i]);
-            strcat(SendToFC," created time: ");
-            ReadInode(TmpInode,CurrentData.c[i],CurrentData.s[i]);
-            SendToFC = strcat(SendToFC,TmpInode.Time);
-            SendToFC = strcat(SendToFC," ");
-            str = itoa(TmpInode.length);
-            SendToFC = strcat(SendToFC,str);
-            SendToFC = strcat(SendToFC,"\n");
+            bzero(SendToFC,sizeof(SendToFC));
+            for (int i = 0;i < CurrentData.amount;++i)
+            {
+                strcat(SendToFC,CurrentData.Name[i]);
+                strcat(SendToFC,"\n");
+            }
+            Write(client_sockfd,SendToFC,strlen(SendToFC));
+        }
+        else
+        {
+            bzero(SendToFC,sizeof(SendToFC));
+            for (int i = 0;i < CurrentData.amount;++i)
+            {
+                strcat(SendToFC,CurrentData.Name[i]);
+                strcat(SendToFC," created time: ");
+                ReadInode(TmpInode,CurrentData.c[i],CurrentData.s[i]);
+                strcat(SendToFC,TmpInode.Time);
+                strcat(SendToFC," ");
+                str = itoa(TmpInode.length,str);
+                strcat(SendToFC,str);
+                strcat(SendToFC,"\n");    
+            }
+            Write(client_sockfd,SendToFC,strlen(SendToFC));
         }
     }
+    delete str;
     return ;
 }
 
 char * ReadData(char *str,Inode Node)
 {
     int c,s;
-    char tmp[10];
     bzero(str,sizeof(str));
     for (int i = 0;i < Node.used;++i)
     { 
@@ -687,8 +911,9 @@ int Catch(char *filename)
 {
     int k = -1;
     Inode TmpInode;
-    char str[MAXSIZE];
-    if (1 == CurrentInode.flag) return 0;
+    char *str = new char[MAXSIZE];
+
+
     for (int i = 0;i < CurrentData.amount;++i)
         if (!strcmp(filename,CurrentData.Name[i]))
         {
@@ -697,29 +922,36 @@ int Catch(char *filename)
         }
     if (k < 0) 
     { 
-        HandleError("No such file\n");
+        delete str;
+        HandleError("1:No such filename exists\n");
         return 0;
     }
-   ReadInode(TmpInode,CurrentData.c[k],CurrentData.s[k]);
+    ReadInode(TmpInode,CurrentData.c[k],CurrentData.s[k]);
     if (1 == TmpInode.flag)
     {
-        HandleError("No such file\n");
+        delete str;
+        HandleError("1:No such filename exists\n");
         return 0;
     }
     bzero(SendToFC,sizeof(SendToFC));
-    SendToFC = strcat(SendToFC,"0 ");
-    str = itoa(TmpInode.length);
-    SendToFC = strcat(SendToFC,str);
-    SendToFC = strcat(SendToFC," ");
+    strcat(SendToFC,"0 ");
+    str = itoa(TmpInode.length,str);
+    strcat(SendToFC,str);
+    strcat(SendToFC," ");
     str = ReadData(str,TmpInode);
-    SendToFC = strcat(SendToFC,str);
+    strcat(SendToFC,str);
+    strcat(SendToFC,"\n");
     Write(client_sockfd,SendToFC,strlen(SendToFC));
+    
+    delete str;
     return 1;
 }
 void Catchfile(char *path)
 {
     int k = -1;
     char filename[BLOCKSIZE];
+    Inode TempInode;
+    InodeData TempData;
 
     for (int i = strlen(path);i >= 0;--i)
         if ('/' == path[i]) 
@@ -731,9 +963,9 @@ void Catchfile(char *path)
     strcpy(filename,&path[k + 1]);
     TempInode = CurrentInode;
     TempData = CurrentData;
-    if (filename == NULL || !Changedir(path))
+    if (k > -1 && (filename == NULL || !Changedir(path)))
     {
-        HandleError("No such file or directory\n");
+        HandleError("1:No such file or directory\n");
         return;
     };
     if (!Catch(filename))  
@@ -756,209 +988,268 @@ void Catchfile(char *path)
 void WriteData(char *path)
 {
     char *filename,*tmp,*data;
+    char *WD = NULL;
     int len,k,Acylinder,Asector;
-    Inode TmpNode;
+    Inode TmpInode;
+    InodeData TmpData;
 
-    filename = strtok(NULL," \n");
-    tmp = strtok(NULL," \n");
+    filename = strtok_r(path," \n",&WD);
+    tmp = strtok_r(NULL," \n",&WD);
     len = atoi(tmp);
-    data = strtok(NULL," \n");
+    data = strtok_r(NULL," \n",&WD);
     k = -1;
     for (int i = 0;i < CurrentData.amount;++i)
-        if (0 == strcmp(filename,Name[i]))
+        if (0 == strcmp(filename,CurrentData.Name[i]))
         {
             k = i;
             break;
         }
     if (k < 0) 
     {
-        HandleError("No such file exists\n");
+        HandleError("1:No such file exists\n");
         return;
     }
 
     ReadInode(TmpInode,CurrentData.c[k],CurrentData.s[k]);
-    if (1 == TmpNode.flag)
+    if (1 == TmpInode.flag)
     {
-        HandleError("No such file exist\n");
+        HandleError("1:No such file exist\n");
         return;
     }
     else
     {
-        TmpNode.length = len;
-        TmpNode.used = len / BLOCKSIZE;
-        if (0 != len % BLOCKSIZE) ++TmpNode.used;
-        for (int i = 0;i < TmpNode.used;++i)
+        TmpInode.length = len;
+        TmpInode.used = len / BLOCKSIZE;
+        if (0 != len % BLOCKSIZE) ++TmpInode.used;
+        for (int i = 0;i < TmpInode.used;++i)
         {
-            if (point[i][0] == 0 && point[i][1] == 0)
+            if (TmpInode.point[i][0] == 0 && TmpInode.point[i][1] == 0)
             {
-                InodeData NewData;
-                GetBlock(NewData,Acylinder,Asector);
-                CurrentInode.point[i][0] = Acylinder;
-                CurrentInode.point[i][1] = Asector;
+                GetBlock(TmpData,Acylinder,Asector);
+                TmpInode.point[i][0] = Acylinder;
+                TmpInode.point[i][1] = Asector; 
+            }
+            else
+            {
+                Acylinder = TmpInode.point[i][0];
+                Asector = TmpInode.point[i][1];
             }
             bzero(SendToBDS,sizeof(SendToBDS));
-            SendToBDS = strcat(SendToBDS,"W ");
-            tmp = itoa(Acylinder);
-            SendToBDS = strcat(SendToBDS,tmp);
-            SendToBDS = strcat(SendToBDS," ");
-            tmp = itoa(Asector);
-            SendToBDS = strcat(SendToBDS,tmp);
-            SendToBDS = strcat(SendToBDS," ");
-            if (i < TmpNode.used - 1) tmp = itoa(BLOCKSIZE);
-            else tmp = itoa(len % BLOCKSIZE);
-            SendToBDS = strcat(SendToBDS,tmp);
-            SendToBDS = strcat(SendToBDS," ");
-            data = &data[i * BLOCKSIZE]
-                tmp = strncpy(tmp,data,BLOCKSIZE);
-            SendToBDS = strcat(SendToBDS,tmp);
+            strcat(SendToBDS,"W ");
+            tmp = itoa(Acylinder,tmp);
+            strcat(SendToBDS,tmp);
+            strcat(SendToBDS," ");
+            tmp = itoa(Asector,tmp);
+            strcat(SendToBDS,tmp);
+            strcat(SendToBDS," ");
+            if (i < TmpInode.used - 1) tmp = itoa(BLOCKSIZE,tmp);
+            else tmp = itoa(len % BLOCKSIZE,tmp);
+            strcat(SendToBDS,tmp);
+            strcat(SendToBDS," ");
+            data = &data[i * BLOCKSIZE];
+            tmp = strncpy(tmp,data,BLOCKSIZE);
+            strcat(SendToBDS,tmp);
+            strcat(SendToBDS,"\n");
             Write(sockfd_BDS,SendToBDS,strlen(SendToBDS));
+            if (!WriteSuccess())
+            {
+                 HandleError("2:Wrong Write\n");
+                 return;
+            }
         }
+        WriteBack(TmpInode,TmpData);
     }
+    HandleError("0:successfully written file\n");
     return ;
 }
 
 
 void Append(char *path)
 {
-    char *filename,*tmp,*data;
-    int len,k;
+    char *filename;
+    char *tmp;
+    char *data;
+    char *tmpdata = new char[MAXSIZE];
+    char *writetmp = new char[MAXSIZE];
+    int len,k,tmplen;
+    char *Ad = NULL;
+    Inode TmpInode;
 
-    filename = strtok(NULL," \n");
-    tmp = strtok(NULL," \n");
+    filename = strtok_r(path," \n",&Ad);
+    tmp = strtok_r(NULL," \n",&Ad);
     len = atoi(tmp);
-    data = strtok(NULL," \n");
+    data = strtok_r(NULL,"\n",&Ad);
     k = -1;
     for (int i = 0;i < CurrentData.amount;++i)
-        if (0 == strcmp(filename,Name[i]))
+        if (0 == strcmp(filename,CurrentData.Name[i]))
         {
             k = i;
             break;
         }
     if (k < 0) 
     {
-        HandleError("No such file exists\n");
+        HandleError("1:No such file exists\n");
         return;
     }
-    Inode TmpNode;
-    TmpNode = ReadInode(CurrentData.c[k],CurrentData.s[k]);
-    if (1 == TmpNode.flag)
+    ReadInode(TmpInode,CurrentData.c[k],CurrentData.s[k]);
+    if (1 == TmpInode.flag)
     {
-        HandleError("No such file exist\n");
+        HandleError("1:No such file exist\n");
         return;
     }
     else
     {
-        tmplen = TmpNode.length + len;
+        tmplen = TmpInode.length + len;
         bzero(tmpdata,sizeof(tmpdata));
-        for (int i = 0;i < TmpNode.used;++i)
-        {
-            bzero(SendToBDS,sizeof(SendToBDS));
-            strcpy(SendToBDS,"R ");
-            tmp = itoa(point[i][0]);
-            strcpy(SendToBDS,tmp);
-            tmp = itoa(point[i][1]);
-            strcpy(SendToBDS,tmp);
-            Write(sockfd_BDS,SendToBDS,strlen(SendToBDS));
-            Read(sockfd_BDS,ReceFromBDS,MAXSIZE);
-            tmpdata = strcpy(tmpdata,ReceFromBDS);
-        }
-        bzero(tmp,sizeof(tmp));
-        strcpy(tmp,filename);
-        strcat(tmp," ");
-        strcat(tmp,itoa(tmplen));
-        strcat(tmp," ");
-        strcat(tmp,tmpdata);
-        WriteData(tmpdata);
+        tmpdata = ReadData(tmpdata,TmpInode);
+        tmpdata[strlen(tmpdata) - 1] = 0;
+        strcat(tmpdata,data);
+        bzero(writetmp,sizeof(writetmp));
+        strcpy(writetmp,filename);
+        strcat(writetmp," ");
+        strcat(writetmp,itoa(tmplen,tmp));
+        strcat(writetmp," ");
+        strcat(writetmp,tmpdata);
+        strcat(writetmp,"\n");
+        WriteData(writetmp);
     }
+    delete writetmp;
+    delete tmpdata;
     return;
 }
 
+void WriteOrder(int c,int s,char *str)
+{
+    char *tmp = new char[MAXSIZE];
+
+    bzero(SendToBDS,sizeof(SendToBDS));
+    strcat(SendToBDS,"W ");
+
+    tmp = itoa(c,tmp);
+    strcat(SendToBDS,tmp);
+    strcat(SendToBDS," ");
+
+    tmp = itoa(s,tmp);
+    strcat(SendToBDS,tmp);
+    strcat(SendToBDS," ");
+
+    tmp = itoa(strlen(str),tmp);
+    strcat(SendToBDS,tmp);
+    strcat(SendToBDS," ");
+    strcat(SendToBDS,str);
+    strcat(SendToBDS,"\n");
+
+    Write(sockfd_BDS,SendToBDS,strlen(SendToBDS));
+
+    if (!WriteSuccess())
+    {
+        HandleError("Write error\n");
+        return;
+    };
+}
 void Exit()
 {
-    char *info[BLOCKSIZE],*tmp[BLOCKSIZE];
+    char *info = new char[MAXSIZE];
+    char *tmp = new char [MAXSIZE];
+    char *str = new char[MAXSIZE];
+    int len;
 
     /*SuperBlock*/
     bzero(info,sizeof(info));
-    info[0] = valid;
+    info[0] = SuperBlock.valid;
+    info[1] = 0;
+    strcat(info," ");
 
-    tmp = itoa(SuperBlock.cylinder);
+    tmp = itoa(SuperBlock.cylinder,tmp);
     info = strcat(info,tmp);
     info = strcat(info," ");
 
-    tmp = itoa(SuperBlock.sector);
+    tmp = itoa(SuperBlock.sector,tmp);
     info = strcat(info,tmp);
     info = strcat(info," ");
 
-    tmp = itoa(SuperBlock.inodenum);
+    tmp = itoa(SuperBlock.inodenum,tmp);
     info = strcat(info,tmp);
     info = strcat(info," ");
 
-    tmp = itoa(SuperBlock.datanum);
+    tmp = itoa(SuperBlock.datanum,tmp);
     info = strcat(info,tmp);
     info = strcat(info," ");
 
-    tmp = itoa(SuperBlock.InodeBitMapLen);
+    tmp = itoa(SuperBlock.InodeBitMapLen,tmp);
     info = strcat(info,tmp);
     info = strcat(info," ");
 
-    tmp = itoa(SuperBlock.DataBitMapLen);
+    tmp = itoa(SuperBlock.DataBitMapLen,tmp);
     info = strcat(info,tmp);
     info = strcat(info," ");
 
-    tmp = itoa(SuperBlock.InodeBitBlock);
+    tmp = itoa(SuperBlock.InodeBitBlock,tmp);
     info = strcat(info,tmp);
     info = strcat(info," ");
 
-    tmp = itoa(SuperBlock.DataBitBlock);
+    tmp = itoa(SuperBlock.DataBitBlock,tmp);
     info = strcat(info,tmp);
     info = strcat(info," ");
 
-    tmp = itoa(SuperBlock.usedinode);
+    tmp = itoa(SuperBlock.usedinode,tmp);
     info = strcat(info,tmp);
     info = strcat(info," ");
 
-    tmp = itoa(SuperBlock.useddata);
+    tmp = itoa(SuperBlock.useddata,tmp);
     info = strcat(info,tmp);
     info = strcat(info," ");
 
-    tmp = itoa(SuperBlock.rootcylinder);
+    tmp = itoa(SuperBlock.rootcylinder,tmp);
     info = strcat(info,tmp);
     info = strcat(info," ");
 
-    tmp = itoa(SuperBlock.rootsector);
+    tmp = itoa(SuperBlock.rootsector,tmp);
     info = strcat(info,tmp);
     info = strcat(info," ");
 
-    tmp = itoa(SuperBlock.blockstart);
+    tmp = itoa(SuperBlock.blockstart,tmp);
     info = strcat(info,tmp);
+    info = strcat(info,"\n");
 
     len = strlen(info);
-    tmp = itoa(len);
+    tmp = itoa(len,tmp);
     tmp = strcat(tmp," ");
 
     bzero(SendToBDS,sizeof(SendToBDS));
-    SendToBDS = strcat(SendToBDS,"W 0 0 ");
-    SendToBDS = strcat(SendToBDS,tmp);
-    SendToBDS = strcat(SendToBDS,info);
+    strcat(SendToBDS,"W 0 0 ");
+    strcat(SendToBDS,tmp);
+    strcat(SendToBDS,info);
     Write(sockfd_BDS,SendToBDS,strlen(SendToBDS));
+    if (!WriteSuccess())
+    {
+        HandleError("Write error\n");
+        return;
+    };
+
     /*InodeBitMap*/
-    cylinder = 0;
-    sector = 0;
+    nowcylinder = 0;
+    nowsector = 0;
+    int k = 0;
     for (int i = 0;i < SuperBlock.InodeBitBlock;++i)
     {
-        Next(cylinder,sector);
-        strncpy(str,InodeBitMap[i * BLOCKSIZE],BLOCKSIZE);
-        WriteOrder(cylinder,sector,str);
+        Next(nowcylinder,nowsector);
+        strncpy(str,&InodeBitMap[i * BLOCKSIZE],BLOCKSIZE);
+        WriteOrder(nowcylinder,nowsector,str);
     }
     /*DataBitMap*/
     for (int i = 0;i < SuperBlock.DataBitBlock;++i)
     {
-        Next(cylinder,sector);
-        strncpy(str,DataBitMap[i * BLOCKSIZE],BLOCKSIZE);
-        WriteOrder(cylinder,sector,str);
+        Next(nowcylinder,nowsector);
+        strncpy(str,&InodeBitMap[i * BLOCKSIZE],BLOCKSIZE);
+        WriteOrder(nowcylinder,nowsector,str);
     }
 
     /*CurrentInode*/
     WriteBack(CurrentInode,CurrentData);
+
+    delete info;
+    delete tmp;
+    delete str;
     return;
 }

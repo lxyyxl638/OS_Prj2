@@ -1,4 +1,5 @@
 #include <sys/mman.h>
+#include <iostream>
 #include <pthread.h>
 #include <cstdio>
 #include <cstdlib>
@@ -23,7 +24,11 @@ int cylinders,sectors,delay,nowcylinder = 0;
 char * diskfile;
 char recebuf[MAXSIZE],sendbuf[MAXSIZE];
 int client_sockfd;
-
+pthread_t tid;
+pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+bool flag;
+int num = 0;
+using namespace std;
 struct Node
 {
     char com;
@@ -31,7 +36,33 @@ struct Node
     char data[MAXSIZE];
 };
 
+struct CmpSSTF
+{
+    bool operator()(Node a,Node b)
+    {
+        if (a.com == 'E') return true;
+        if (b.com == 'E') return false;
+        return abs(a.r - nowcylinder) >= abs(b.r - nowcylinder);
+    }
+};
+struct CmpC_LOOK
+{
+    bool operator()(Node a,Node b)
+    {
+        int delta_a,delta_b;
 
+        if (a.com == 'E') return true;
+        if (b.com == 'E') return false;
+        delta_a = a.r - nowcylinder;
+        delta_b = b.r - nowcylinder;
+        if (delta_a >= 0 && delta_b < 0) return false;
+        if (delta_a < 0 && delta_b >= 0) return true;
+        return delta_a >= delta_b;
+    }
+};
+std::queue <Node> CacheFCFS;
+std::priority_queue <Node,std::vector<Node>,CmpSSTF> CacheSSTF;
+std::priority_queue <Node,std::vector<Node>,CmpC_LOOK> CacheC_LOOK;
 Node Mynode;
 int Open(char* filename)
 {
@@ -162,10 +193,13 @@ char *itoa(int x,char *str)
     return str; 
 }
 
+
+
+
 int geti(char *str,int & result)
 {
     int i = 0,k = 0;
-    char * tmpbuf = new char[MAXSIZE];
+    char tmpbuf[MAXSIZE];
 
     while (i < strlen(str))
     {
@@ -177,29 +211,34 @@ int geti(char *str,int & result)
     tmpbuf[k] = 0;
     result = atoi(tmpbuf);
     ++i;
-
     return i;
 }
 
 void init(char *p,Node & Mynode)
 {
     char *in_ptr = NULL;
+    char *tmp = new char[MAXSIZE];
+    char *del;
 
-    p = strtok_r(p," ",&in_ptr);
-    Mynode.com = p[0];
+    strcpy(tmp,p);
+    del = tmp;
+    tmp = strtok_r(tmp," \n",&in_ptr);
+    Mynode.com = tmp[0];
     if (Mynode.com == 'W' || Mynode.com == 'R')
     {
-        p = strtok_r(NULL," ",&in_ptr);
-        Mynode.r = atoi(p);
-        p = strtok_r(NULL," ",&in_ptr);
-        Mynode.s = atoi(p);
+        tmp = strtok_r(NULL," ",&in_ptr);
+        Mynode.r = atoi(tmp);
+        tmp = strtok_r(NULL," ",&in_ptr);
+        Mynode.s = atoi(tmp);
         if (Mynode.com == 'W')
         {
-            p = strtok_r(NULL," ",&in_ptr);
+            tmp = strtok_r(NULL," ",&in_ptr);
             Mynode.len = atoi(p);
-            strcpy(Mynode.data,in_ptr);
+            tmp = strtok_r(NULL," ",&in_ptr);
+            strcpy(Mynode.data,tmp);
         }
     }
+    delete del;
 }
 
 void handle(Node Mynode)
@@ -217,7 +256,6 @@ void handle(Node Mynode)
         itoa(sectors,str);
         strcat(sendbuf,str);
         strcat(sendbuf,"\n");
-        Write(client_sockfd,sendbuf,strlen(sendbuf));
     }
     else
     {
@@ -228,11 +266,13 @@ void handle(Node Mynode)
         }
         else
         {
+            time = abs(Mynode.r - nowcylinder) * delay;
+            usleep(time);
+            nowcylinder = Mynode.r;
             switch (Mynode.com)
             {
-                case 'R':
-                        //strcat(sendbuf,"Yes ");
-                         memcpy(sendbuf,&diskfile[BLOCKSIZE * (Mynode.r * sectors + Mynode.s)],BLOCKSIZE);
+                case 'R':strcat(sendbuf,"Yes ");
+                         memcpy(&sendbuf[4],&diskfile[BLOCKSIZE * (Mynode.r * sectors + Mynode.s)],BLOCKSIZE);
                          strcat(sendbuf,"\n");
                          break;
                 case 'W': 
@@ -241,12 +281,81 @@ void handle(Node Mynode)
                          break;
             }
         }
-
-        Write(client_sockfd,sendbuf,strlen(sendbuf));
-        time = abs(Mynode.r - nowcylinder) * delay;
-        usleep(time);
-        nowcylinder = Mynode.r;
     }
-
 }
+//pthread
+void *C_LOOK(void *arg)
+{
+    Node Mynode;
+    while (1)
+    {
+        if (!CacheC_LOOK.empty())
+        {      
+            pthread_mutex_lock(&mutex);
+            Mynode = CacheC_LOOK.top();
+            CacheC_LOOK.pop();
+            pthread_mutex_unlock(&mutex); 
+            if (Mynode.com == 'E') 
+            {
+                flag = true;
+                bzero(sendbuf,sizeof(sendbuf));
+                strcat(sendbuf,"EXIT\n");
+                Write(client_sockfd,sendbuf,strlen(sendbuf));
+                cout << flush;
+                return (void *) 1;
+            }
+            handle(Mynode);
+            Write(client_sockfd,sendbuf,strlen(sendbuf));
+        }
+    }
+}
+void *SSTF(void *arg)
+{
+    while (1)
+    {  
+        if (!CacheSSTF.empty())
+        {
+            pthread_mutex_lock(&mutex);
+            Mynode = CacheSSTF.top();
+            CacheSSTF.pop();
+            pthread_mutex_unlock(&mutex);
+            if (Mynode.com == 'E') 
+            {
+                flag = true;
+                bzero(sendbuf,sizeof(sendbuf));
+                strcat(sendbuf,"EXIT\n");
+                Write(client_sockfd,sendbuf,strlen(sendbuf));
+                return (void *) 1;
+            }
+            handle(Mynode);
+            Write(client_sockfd,sendbuf,strlen(sendbuf));
+        }
+    }
+}
+void *FCFS(void *arg)
+{
+    Node Mynode;
+    while (1)
+    {
+        if (!CacheFCFS.empty())
+        {
+
+            pthread_mutex_lock(&mutex);
+            Mynode = CacheFCFS.front();
+            CacheFCFS.pop();
+            pthread_mutex_unlock(&mutex);
+            if (Mynode.com == 'E') 
+            {
+                flag = true;
+                bzero(sendbuf,sizeof(sendbuf));
+                strcat(sendbuf,"EXIT\n");
+                Write(client_sockfd,sendbuf,strlen(sendbuf));
+                return (void *) 1;
+            }
+            handle(Mynode);
+            Write(client_sockfd,sendbuf,strlen(sendbuf));
+        }
+    }
+}
+
 

@@ -58,17 +58,7 @@ int main(int argc,char* argv[])
                 init(p,Mynode);
                 handle(Mynode);
                 p = strtok_r(NULL,"\n",&out_ptr);
-            }
-          /*   switch(buf[0])
-            {
-              case 'I':queryI(cylinders,sectors,sendbuf);break;
-              case 'R':queryR(diskfile,cylinders,sectors,buf,nowcylinder,delay,sendbuf);break;
-              case 'W':queryW(diskfile,cylinders,sectors,buf,nowcylinder,delay,sendbuf);break;
-            }
-           */
-          //  Write(client_sockfd,sendbuf,strlen(sendbuf)); 
-           // Write(client_sockfd,sendbuf,strlen(sendbuf));
-             
+            } 
        }
        Close(client_sockfd);
     }

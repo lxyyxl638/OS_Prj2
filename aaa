@@ -1,0 +1,38 @@
+FCFS:100 100 1000                          200 200 1000
+     1 Time is 6.110000                     1 Time is 14.680000
+     2 Time is 6.600000                     2 Time is 12.840000
+     4 Time is 6.200000                     4 Time is 12.630000
+     8 Time is 6.650000                     8 Time is 12.420000
+    16 Time is 6.010000                    16 Time is 12.990000
+    32 Time is 5.300000                    32 Time is 12.070000
+    64 Time is 4.480000                    64 Time is 7.990000
+   128 Time is 2.320000                   128 Time is 4.640000  
+   256 Time is 0.030000                   256 Time is 0.020000 
+
+SSTF:100 100 1000                         200 200 1000
+     1 Time is 7.140000                   1 Time is 11.540000
+     2 Time is 7.380000                   2 Time is 12.480000
+     4 Time is 7.140000                   4 Time is 8.750000
+     8 Time is 4.310000                   8 Time is 6.980000
+    16 Time is 3.000000                  16 Time is 4.520000  
+    32 Time is 3.340000                  32 Time is 5.870000
+    64 Time is 2.670000                  64 Time is 3.310000
+   128 Time is 0.320000                 128 Time is 1.120000 
+   256 Time is 0.090000                 256 Time is 0.100000 
+
+CLOOK:100 100 1000
+    1 Time is 6.250000                    1 Time is 11.850000
+    2 Time is 4.980000                    2 Time is 10.960000 
+    4 Time is 3.370000                    4 Time is 7.460000
+    8 Time is 2.200000                    8 Time is 4.170000
+   16 Time is 1.260000                   16 Time is 2.180000
+   32 Time is 0.740000                   32 Time is 1.210000
+   64 Time is 0.700000                   64 Time is 0.860000
+  128 Time is 0.370000                  128 Time is 0.240000 
+  256 Time is 0.080000                  256 Time is 0.080000
+
+
+ 
+
+
+

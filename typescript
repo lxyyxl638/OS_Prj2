@@ -1,0 +1,18 @@
+Q1:
+supery@supery-K43SD ~/Prj2 $ sudo ./BDS1 shiyan.txt 100 100 100000 8000
+The server is listening
+Connect successfully
+
+supery@supery-K43SD ~/Prj2 $ ./BDC localhost 8000
+I
+100 100
+W 10 10 5 12345
+Yes
+R 10 10 
+12345
+II
+No such Command
+
+Q2:
+
+
