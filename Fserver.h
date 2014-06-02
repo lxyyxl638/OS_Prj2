@@ -334,6 +334,7 @@ void ReadInodeData(InodeData& MyData,Inode & Mynode)
 bool GetInode(Inode & NewInode, char const *filename,int Choice)
 {
     int k = -1;
+    printf("337 %s\n",filename);
     for (int i = 0;i < SuperBlock.InodeBitMapLen;++i) 
         if (InodeBitMap[i] == '0')
         {
@@ -347,10 +348,10 @@ bool GetInode(Inode & NewInode, char const *filename,int Choice)
     }
 
     InodeBitMap[k] = '1';
- /*   time_t t;
+    time_t t;
     t = time(&t);
     strncpy(NewInode.Time,ctime(&t),24);
-*/
+
     strcpy(NewInode.Name,filename);
     NewInode.c = k / SuperBlock.sector;
     NewInode.s = k % SuperBlock.sector;
@@ -371,8 +372,10 @@ void initial()
     strcat(SendToBDS,"R 0 0\n");
     Write(sockfd_BDS,SendToBDS,strlen(SendToBDS)); 
     bzero(ReceFromBDS,sizeof(ReceFromBDS));
+
     Read(sockfd_BDS,ReceFromBDS,MAXSIZE);
     Write(STDOUT_FILENO,ReceFromBDS,strlen(ReceFromBDS));
+
     bzero(InodeBitMap,sizeof(InodeBitMap));
     bzero(DataBitMap,sizeof(DataBitMap));
     if (ReceFromBDS[0] != '1')
@@ -382,7 +385,7 @@ void initial()
         Write(sockfd_BDS,SendToBDS,strlen(SendToBDS));
         bzero(ReceFromBDS,sizeof(ReceFromBDS));
         Read(sockfd_BDS,ReceFromBDS,MAXSIZE);
-
+        
         strcpy(str,ReceFromBDS);
         p = str;
         str = strtok(str," \n");
@@ -508,9 +511,14 @@ void Format()
     bzero(SendToBDS,sizeof(SendToBDS));
     strcpy(SendToBDS,"W 0 0 1 0\n");
     Write(sockfd_BDS,SendToBDS,BLOCKSIZE);
+    if (!WriteSuccess())
+    {
+        HandleError("1:Format fails\n");
+        return ;
+    }
     initial();
     bzero(SendToFC,sizeof(SendToFC));
-    strcat(SendToFC,"Format Successfully");
+    strcat(SendToFC,"Format Successfully\n");
     Write(client_sockfd,SendToFC,strlen(SendToFC));
 }
 
@@ -679,7 +687,7 @@ int Changedir(char *path)
                 Check = EnterFile(TmpInode,TmpData,path);
                 if (!Check) 
                 {
-                    HandleError("No such file or directory\n");
+                    HandleError("1:No such file or directory\n");
                     return 0;
                 }
                 path = strtok_r(NULL,"/",&CD);
@@ -693,7 +701,7 @@ int Changedir(char *path)
             {
                 if (TmpInode.c == SuperBlock.rootcylinder && TmpInode.s == SuperBlock.rootsector)
                 {
-                    HandleError("No such file exists\n");
+                    HandleError("1:No such file exists\n");
                     return 0;
                 }
                 ReadInode(TmpInode,TmpInode.parentcylinder,TmpInode.parentsector);
@@ -707,7 +715,6 @@ int Changedir(char *path)
                     Check = EnterFile(TmpInode,TmpData,path);
                     if (!Check)
                     {
-                        HandleError("No such file or directory\n");
                         return 0;
                     }
                     path = strtok_r(NULL,"/",&CD);
@@ -726,16 +733,18 @@ int Changedir(char *path)
 
 int Create(char *filename,int Choice)
 {
-
+    printf("%s\n",filename);
     for (int i = 0; i < CurrentData.amount;++i)
         if (!strcmp(CurrentData.Name[i],filename))
         {
-            HandleError("The file has existed\n");
+            HandleError("1:The file has existed\n");
             return 0;
         }
 
     if (!GetInode(NewInode,filename,Choice))  return 0;
     strncpy(CurrentData.Name[CurrentData.amount],filename,strlen(filename));
+    CurrentData.Name[CurrentData.amount][strlen(filename)] = 0;
+    printf("746 %s\n",CurrentData.Name[CurrentData.amount]);
     CurrentData.c[CurrentData.amount] = NewInode.c;
     CurrentData.s[CurrentData.amount] = NewInode.s;
     ++CurrentData.amount;
@@ -767,8 +776,10 @@ void Createfile(char *path,int Choice)
             path[k] = 0;
             break;
         }
+  if (k > -1) strcpy(filename,&path[k + 1]);
+  else strcpy(filename,path);
+  filename[strlen(path)] = 0;
 
-    strcpy(filename,&path[k + 1]);
     TempInode = CurrentInode;
     TempData = CurrentData;
     if (k > -1 && (filename == NULL || !Changedir(path)))
@@ -776,9 +787,9 @@ void Createfile(char *path,int Choice)
         HandleError("2:No such directory\n");
         return;
     };
+
     if (!Create(filename,Choice))  
     {
-        HandleError("1:No such file or directory\n");
         if (k > -1)
         {
             CurrentInode = TempInode;
@@ -803,9 +814,12 @@ int Remove(char *filename,int Choice)
             break;
         }
 
-    if (-1 == k) return 0;
+    if (-1 == k) 
+    {   printf("No such file\n");
+        return 0;
+    }
     --CurrentData.amount;
-    strcpy(CurrentData.Name[k],CurrentData.Name[CurrentData.amount]);
+    strncpy(CurrentData.Name[k],CurrentData.Name[CurrentData.amount],strlen(CurrentData.Name[CurrentData.amount]));
     CurrentData.c[k] = CurrentData.c[CurrentData.amount];
     CurrentData.s[k] = CurrentData.s[CurrentData.amount];
     WriteBack(CurrentInode,CurrentData);
@@ -832,7 +846,7 @@ void Removefile(char *path,int Choice)
     TempData = CurrentData;
     if (k > -1 && (filename == NULL || !Changedir(path)))
     {
-        HandleError("1:No such directory\n");
+        HandleError("1:No such file or directory\n");
         return;
     };
     if (!Remove(filename,Choice))  
@@ -898,6 +912,7 @@ char * ReadData(char *str,Inode Node)
 {
     int c,s;
     bzero(str,sizeof(str));
+    strcpy(str,"");
     for (int i = 0;i < Node.used;++i)
     { 
         c = Node.point[i][0];
@@ -1101,8 +1116,11 @@ void Append(char *path)
     {
         tmplen = TmpInode.length + len;
         bzero(tmpdata,sizeof(tmpdata));
-        tmpdata = ReadData(tmpdata,TmpInode);
-        tmpdata[strlen(tmpdata) - 1] = 0;
+        if (TmpInode.length > 0) 
+         { 
+            tmpdata = ReadData(tmpdata,TmpInode);
+            tmpdata[strlen(tmpdata) - 1] = 0;
+         }
         strcat(tmpdata,data);
         bzero(writetmp,sizeof(writetmp));
         strcpy(writetmp,filename);

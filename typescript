@@ -14,5 +14,94 @@ II
 No such Command
 
 Q2:
+/*这是RDC，先输出生成的指令，下面的‘YES’是IDS的返回值*/
+supery@supery-K43SD ~/Prj2 $ ./RDC localhost 8000 10
+The command amount is 11
+I
+200 200
+10 R 170 147
+9 R 171 59
+8 W 12 165 70 0764353024075875366836816926387353000334931430277070753376126863383316
+7 R 191 42
+6 W 167 175 33 9292919774456616440295683707659603000334931430277070753376126863383316
+5 R 190 111
+4 W 79 98 43 5491300760285861780331153176271820153141389430277070753376126863383316
+3 W 38 137 93 554115468636037850223386996075453864302388991796930278887687442728370501392481275214324202968
+2 W 163 100 62 694295707290487923267681651181370911682323573587003082369587832728370501392481275214324202968
+1 R 21 22
+EXIT
+Yes 
+Yes
+Yes
+Yes
+Yes
+Yes 
+Yes 
+Yes
+Yes 
+Yes 
+EXIT
+/*这是IDS，可以计算时间*/
+supery@supery-K43SD ~/Prj2 $ sudo ./IDS disk 200 200 1000 8000 5 SSTF
+The server is listening
+Connect successfully
+Time is 0.570000
 
-
+Q3：
+/*这是FC的输出结果*/
+supery@supery-K43SD ~/Prj2 $ ./FC localhost 12356
+/ $ f
+Format Successfully
+/ $ mk file1
+0:successfully create the file
+/ $ mk file1
+1:The file has existed
+/ $ mkdir folder1
+0:successfully create the file
+/ $ ls 0   
+file1
+folder1
+/ $ ls 1
+file1 created time: xxxxxxxxxxxxxxxxxxxxxxxx 0
+folder1 created time: xxxxxxxxxxxxxxxxxxxxxxxx 0
+/ $ cd folder1
+folder1 $ cd ..
+/ $ w file1 5 12345
+0:successfully written file
+/ $ a file1 5 12345
+0:successfully written file
+/ $ cat file1
+0 10 1234512345
+/ $ cd .
+supery@supery-K43SD ~/Prj2 $ ./FC localhost 12356
+/ $ f
+Format Successfully
+/ $ mk file1
+0:successfully create the file
+/ $ mk file1
+1:The file has existed
+/ $ mkdir folder1
+0:successfully create the file
+/ $ ls 0   
+file1
+folder1
+/ $ ls 1
+file1 created time: Mon Jun  2 13:42:25 2014 0
+folder1 created time: Mon Jun  2 13:42:31 2014 0
+/ $ cd folder1
+folder1 $ cd ..
+/ $ w file1 5 12345
+0:successfully written file
+/ $ a file1 5 12345
+0:successfully written file
+/ $ cat file1
+0 10 1234512345
+/ $ cd .
+/ $ ls 0
+file1
+folder1
+/ $ rmdir folder1
+0:successfully remove the file
+/ $ ls 0
+file1
+/ $ exit

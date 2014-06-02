@@ -67,7 +67,7 @@ int main(int argc,char* argv[])
                 Changedir(str);
                 HandleError("cdok!\n");
             }
-            else if (0 == strcmp(str,"rmdir d")) 
+            else if (0 == strcmp(str,"rmdir")) 
             {
                 str = strtok(NULL," \n"); /*Remove a folder*/
                 Removefile(str,1);
